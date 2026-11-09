@@ -1,0 +1,116 @@
+// ApplyPilot schema — SQLite via @prisma/adapter-better-sqlite3.
+// Client is generated to src/generated/prisma; import from '@/generated/prisma/client'.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum RunMode {
+  REVIEW
+  AUTO
+}
+
+enum ApplicationStatus {
+  QUEUED
+  APPROVED
+  SUBMITTED
+  FAILED
+  SKIPPED
+  NEEDS_USER
+  EXTERNAL_MANUAL
+}
+
+enum TaskStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+  CANCELLED
+}
+
+/// Singleton row (id = 1): search filters + run behaviour.
+model Settings {
+  id        Int      @id @default(1)
+  /// JSON matching `filtersSchema` in src/types/settings.ts
+  filters   Json
+  dailyCap  Int      @default(10)
+  mode      RunMode  @default(REVIEW)
+  threshold Int      @default(70)
+  updatedAt DateTime @updatedAt
+}
+
+/// Singleton row (id = 1): the user's master resume.
+model MasterResume {
+  id             Int      @id @default(1)
+  /// JSON matching `masterResumeSchema` in src/types/resume.ts
+  data           Json
+  sourceFileName String?
+  updatedAt      DateTime @updatedAt
+}
+
+model AnswerBankEntry {
+  id        String   @id @default(cuid())
+  question  String
+  answer    String
+  /// JSON string[]
+  tags      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Job {
+  id          String        @id @default(cuid())
+  site        String
+  /// Site-specific job key (Indeed `jk`)
+  externalId  String
+  /// Hash of normalized company + title + location (secondary dedupe key)
+  dedupeHash  String
+  url         String
+  title       String
+  company     String
+  location    String?
+  salary      String?
+  description String?
+  score       Int?
+  scoreJson   Json?
+  firstSeenAt DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  application Application?
+
+  @@unique([site, externalId])
+  @@index([dedupeHash])
+}
+
+model Application {
+  id          String            @id @default(cuid())
+  jobId       String            @unique
+  job         Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  status      ApplicationStatus @default(QUEUED)
+  resumePath  String?
+  coverLetter String?
+  submittedAt DateTime?
+  error       String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([status])
+}
+
+/// Dashboard → worker queue. The worker polls PENDING tasks.
+model Task {
+  id         String     @id @default(cuid())
+  type       String
+  payload    Json
+  status     TaskStatus @default(PENDING)
+  error      String?
+  createdAt  DateTime   @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  @@index([status, createdAt])
+}
