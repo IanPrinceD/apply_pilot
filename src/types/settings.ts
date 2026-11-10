@@ -10,6 +10,7 @@ import {
   SALARY_PERIOD_VALUES,
   WORK_SETUP_VALUES,
 } from '@/constants/settings';
+import { INDEED_SITE_VALUES } from '@/constants/indeed';
 
 export const filtersSchema = z.object({
   roleKeywords: z.array(z.string().trim().min(1)).default([]),
@@ -28,12 +29,19 @@ export const settingsSchema = z.object({
   dailyCap: z.number().int().min(1).max(MAX_DAILY_CAP).default(DEFAULT_DAILY_CAP),
   mode: z.enum(RUN_MODE_VALUES).default('REVIEW'),
   threshold: z.number().int().min(0).max(100).default(DEFAULT_THRESHOLD),
+  indeedSite: z.enum(INDEED_SITE_VALUES).default('us'),
+  scheduleEnabled: z.boolean().default(false),
+  scheduleTime: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use a time like 09:00')
+    .default('09:00'),
 });
 
 export type Filters = z.infer<typeof filtersSchema>;
 export type SettingsInput = z.infer<typeof settingsSchema>;
 
 export interface SettingsDto extends SettingsInput {
+  lastScheduledRunAt: string | null;
   updatedAt: string;
 }
 

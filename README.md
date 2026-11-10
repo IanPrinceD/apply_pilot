@@ -37,18 +37,31 @@ Next.js 16 (App Router, Cache Components) · TypeScript · MUI v9 + Emotion · M
 
 ```bash
 npm install                     # also runs `prisma generate`
-cp .env.example .env.local      # then fill in ANTHROPIC_API_KEY
+# create .env and .env.local (both gitignored) — see Environment Variables below
 npx prisma migrate dev          # creates data/app.db
 npm run dev                     # http://localhost:3000
 ```
 
 ## Environment Variables
 
-Set these in `.env.local` (gitignored). `.env.example` lists them all.
+Two gitignored files in the project root. Both are loaded by the dashboard, the worker and Prisma; `.env.local` wins if a key is in both.
+
+```bash
+# .env
+DATABASE_URL=file:./data/app.db
+
+# .env.local
+ANTHROPIC_API_KEY=
+LLM_MODEL=claude-opus-5-5
+GOOGLE_SHEETS_ID=
+GOOGLE_SERVICE_ACCOUNT_JSON_PATH=
+```
+
+The database itself is the file `data/app.db` (gitignored). Browse it with `npx prisma studio`.
 
 | Variable | Required | Description |
 |---|---|---|
-| `DATABASE_URL` | Yes | SQLite file, e.g. `file:./data/app.db` |
+| `DATABASE_URL` (`.env`) | Yes | SQLite file, e.g. `file:./data/app.db` |
 | `ANTHROPIC_API_KEY` | For resume parsing (and later scoring/tailoring) | Anthropic API key |
 | `LLM_MODEL` | Yes | Claude model ID, e.g. `claude-opus-5-5` |
 | `GOOGLE_SHEETS_ID` | Phase 5 | Target spreadsheet ID |

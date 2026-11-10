@@ -28,20 +28,34 @@ enum ApplicationStatus {
 enum TaskStatus {
   PENDING
   RUNNING
+  NEEDS_USER
   DONE
   FAILED
   CANCELLED
 }
 
+enum WorkerStateValue {
+  IDLE
+  SEARCHING
+  NEEDS_LOGIN
+  NEEDS_USER
+}
+
 /// Singleton row (id = 1): search filters + run behaviour.
 model Settings {
-  id        Int      @id @default(1)
+  id                 Int       @id @default(1)
   /// JSON matching `filtersSchema` in src/types/settings.ts
-  filters   Json
-  dailyCap  Int      @default(10)
-  mode      RunMode  @default(REVIEW)
-  threshold Int      @default(70)
-  updatedAt DateTime @updatedAt
+  filters            Json
+  dailyCap           Int       @default(10)
+  mode               RunMode   @default(REVIEW)
+  threshold          Int       @default(70)
+  /// Key into INDEED_SITES in src/constants/indeed.ts (e.g. "us", "ph")
+  indeedSite         String    @default("us")
+  scheduleEnabled    Boolean   @default(false)
+  /// "HH:mm", local time of the machine running the worker
+  scheduleTime       String    @default("09:00")
+  lastScheduledRunAt DateTime?
+  updatedAt          DateTime  @updatedAt
 }
 
 /// Singleton row (id = 1): the user's master resume.
@@ -64,23 +78,29 @@ model AnswerBankEntry {
 }
 
 model Job {
-  id          String        @id @default(cuid())
-  site        String
-  /// Site-specific job key (Indeed `jk`)
-  externalId  String
+  id                   String       @id @default(cuid())
+  site                 String
+  /// Site-specific job key (Indeed `jk`). `site` includes the country, e.g. "indeed:ph".
+  externalId           String
   /// Hash of normalized company + title + location (secondary dedupe key)
-  dedupeHash  String
-  url         String
-  title       String
-  company     String
-  location    String?
-  salary      String?
-  description String?
-  score       Int?
-  scoreJson   Json?
-  firstSeenAt DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  application Application?
+  dedupeHash           String
+  url                  String
+  title                String
+  company              String
+  location             String?
+  salary               String?
+  description          String?
+  score                Int?
+  scoreJson            Json?
+  easyApply            Boolean      @default(false)
+  postedText           String?
+  /// Role keyword whose search first found this job
+  searchKeyword        String?
+  descriptionFetchedAt DateTime?
+  firstSeenAt          DateTime     @default(now())
+  lastSeenAt           DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  application          Application?
 
   @@unique([site, externalId])
   @@index([dedupeHash])
@@ -103,14 +123,30 @@ model Application {
 
 /// Dashboard → worker queue. The worker polls PENDING tasks.
 model Task {
-  id         String     @id @default(cuid())
-  type       String
-  payload    Json
-  status     TaskStatus @default(PENDING)
-  error      String?
-  createdAt  DateTime   @default(now())
-  startedAt  DateTime?
-  finishedAt DateTime?
+  id             String     @id @default(cuid())
+  type           String
+  payload        Json
+  status         TaskStatus @default(PENDING)
+  /// Live counters, e.g. { pages, found, new, descriptions }
+  progress       Json?
+  /// Human-readable status line shown on the Jobs page
+  message        String?
+  error          String?
+  /// Saved when the worker pauses (CAPTCHA / unknown page), under data/errors/
+  screenshotPath String?
+  createdAt      DateTime   @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
 
   @@index([status, createdAt])
+}
+
+/// Singleton row (id = 1) the worker updates on every heartbeat.
+model WorkerState {
+  id            Int              @id @default(1)
+  state         WorkerStateValue @default(IDLE)
+  loggedIn      Boolean          @default(false)
+  currentTaskId String?
+  message       String?
+  heartbeatAt   DateTime         @default(now())
 }

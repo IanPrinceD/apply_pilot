@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "worker": "tsx watch --env-file=.env --env-file-if-exists=.env.local src/worker/index.ts",
+    "worker:snapshot": "tsx --env-file=.env --env-file-if-exists=.env.local src/worker/snapshot.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",
@@ -25,6 +27,7 @@
     "better-sqlite3": "^12.11.1",
     "mammoth": "^1.13.0",
     "next": "16.4.5",
+    "playwright": "^1.65.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "unpdf": "^2.1.0",

@@ -60,7 +60,7 @@ data/                   # Local-only (gitignored): app.db, browser-profile/, res
 
 ## Commands
 - `npm run dev` — dashboard
-- `npm run worker` — `tsx watch --env-file=.env.local src/worker/index.ts`
+- `npm run worker` — `tsx watch --env-file=.env --env-file-if-exists=.env.local src/worker/index.ts`
 - `npm run build` / `npm start`
 - `npm run lint`
 - `npm run test` — Vitest (`src/**/*.test.ts`)
@@ -198,9 +198,12 @@ A value needed by both a `'use client'` component and server or worker code (fil
   };
   ```
 - Only exception: the `NODE_ENV === 'development'` check gating `ReactQueryDevtools` in `providers.tsx`.
-- `.env.local`:
+- `.env` (gitignored) holds only the database URL:
   ```
   DATABASE_URL=file:./data/app.db
+  ```
+- `.env.local` (gitignored) holds everything else and overrides `.env`:
+  ```
   ANTHROPIC_API_KEY=
   LLM_MODEL=
   GOOGLE_SHEETS_ID=

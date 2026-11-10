@@ -47,11 +47,22 @@ interface SettingsFormInnerProps {
 }
 
 /** Strips the DTO's server-only fields. */
-const toInput = ({ filters, dailyCap, mode, threshold }: SettingsDto): SettingsInput => ({
+const toInput = ({
   filters,
   dailyCap,
   mode,
   threshold,
+  indeedSite,
+  scheduleEnabled,
+  scheduleTime,
+}: SettingsDto): SettingsInput => ({
+  filters,
+  dailyCap,
+  mode,
+  threshold,
+  indeedSite,
+  scheduleEnabled,
+  scheduleTime,
 });
 
 interface InitialForm {
