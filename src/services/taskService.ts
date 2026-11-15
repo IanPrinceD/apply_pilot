@@ -1,6 +1,5 @@
 // src\services\taskService.ts
-import { ACTIVE_TASK_STATUSES } from '@/constants/taskStatus';
-import { TASK_TYPES, type TaskSource } from '@/constants/worker';
+import { ACTIVE_TASK_STATUSES, TASK_TYPES, type TaskSource } from '@/constants/taskStatus';
 import type { Task } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import {
@@ -112,7 +111,7 @@ export const failTask = async (id: string, error: string, screenshotPath?: strin
   });
 };
 
-/** Cancels a queued or running task; the worker stops at its next check. */
+/** Cancels a queued or running task; the runner stops at its next check. */
 export const cancelTask = async (id: string): Promise<TaskDto> => {
   const row = await prisma.task.findUnique({ where: { id } });
   if (!row) return fail(`Task ${id} not found`, 404);
@@ -136,11 +135,11 @@ export const listRecentTasks = async (limit = 10): Promise<TaskDto[]> => {
   return rows.map(toDto);
 };
 
-/** On worker start: tasks left running by a previous worker can't continue. */
+/** After a restart: tasks left running by a previous process can't continue. */
 export const failStaleTasks = async (): Promise<number> => {
   const { count } = await prisma.task.updateMany({
     where: { status: { in: ['RUNNING', 'NEEDS_USER'] } },
-    data: { status: 'FAILED', error: 'Worker restarted before the task finished.', finishedAt: new Date() },
+    data: { status: 'FAILED', error: 'The app restarted before the task finished.', finishedAt: new Date() },
   });
   return count;
 };

@@ -5,7 +5,14 @@
 `AGENTS.md` holds the Next.js-generated agent rules for this Next.js version. Read it alongside this file.
 
 ## Project
-ApplyPilot is a local-first job application assistant. It finds jobs on **Indeed** that match the user's filters, scores them against the user's skills, writes a tailored resume and cover letter for each job, and submits applications. By default every submission waits for the user's approval. Every application is logged to a spreadsheet so no job is ever applied to twice.
+ApplyPilot is a job application assistant built as a **subscription SaaS** and run **local-first**. The owner uses it on their own PC now. The same code deploys to the cloud (Vercel + Neon + R2) later with env changes only.
+
+- It finds jobs through **official job APIs** and scores them against the user's skills.
+- It writes a tailored resume and cover letter for each job.
+- A **browser extension** in the user's own browser autofills application forms. **The user always clicks Submit.**
+- Every application is tracked so no job is ever applied to twice.
+
+Full architecture: `docs/saas-architecture.md` (local-only, gitignored).
 
 The user is a full-stack JS/TS developer (Next.js). Keep explanations brief; use analogies for new concepts.
 
@@ -16,15 +23,25 @@ The user is a full-stack JS/TS developer (Next.js). Keep explanations brief; use
 - **Language:** TypeScript (strict)
 - **UI:** Material UI v9 + `@emotion/styled`; **MUI X DataGrid** (`@mui/x-data-grid`) for all tables
 - **Data fetching:** TanStack Query
-- **Database:** Prisma 7 + **SQLite** (`@prisma/adapter-better-sqlite3`), local file `data/app.db`
-- **Browser automation:** Playwright (Node), in a **separate worker process**, never inside a route handler
-- **AI:** Anthropic SDK (`@anthropic-ai/sdk`); model set via `LLM_MODEL`
-- **Validation:** zod (forms, LLM JSON output, scraped data)
+- **Database:** Prisma 7 + **PostgreSQL** (`@prisma/adapter-pg`). Local Postgres now; Neon (Singapore) when deployed.
+- **Files:** storage driver in `src/lib/storage`. Local `data/uploads/` now; Cloudflare R2 when deployed.
+- **Auth:** Better Auth (Phase 1). Users live in Postgres, and every row is scoped by `userId`.
+- **Browser extension:** Chrome MV3 in `extension/` (Phase 4). It talks to the site's API with a per-device token.
+- **AI:** Anthropic SDK (`@anthropic-ai/sdk`); model set via `LLM_MODEL`. All AI runs server-side.
+- **Validation:** zod (forms, LLM JSON output, job API data)
 - **Resume PDF:** `@react-pdf/renderer`
-- **Tracking:** Google Sheets API (`googleapis`), with `exceljs` for `.xlsx` export
-- **Worker runtime:** `tsx`
+- **Export:** `exceljs` for `.xlsx`; Google Sheets (`googleapis`) optional
+- **Billing:** Paddle or Lemon Squeezy (Phase 5). Off locally (`BILLING_ENABLED=false`).
 
-Runs **locally** on the user's machine. Do not target Vercel or serverless: the browser session must persist, and a residential IP is less likely to be flagged.
+**Local-first, deploy-ready.**
+- Every external service sits behind an env-selected **driver** (local ↔ cloud). Code must behave the same in both.
+- Never hard-code `localhost` or a domain; use `config.appUrl`.
+- The deploy target is Vercel, region `sin1` (the target market is the Philippines). **Don't deploy, and don't add paid services, until the owner says so.** See the spending timeline in the plan doc.
+
+**No automation of job sites.** Indeed blocks automated browsers through Cloudflare.
+- Never drive job sites with Playwright or headless browsers.
+- Never add stealth plugins, fingerprint spoofing or CAPTCHA solving.
+- Jobs come from official APIs. The extension only assists on pages the user has opened, and the user submits.
 
 ---
 
@@ -39,32 +56,31 @@ src/
 │   ├── resume/
 │   ├── settings/
 │   └── history/
-├── services/           # Business logic + all Prisma access (used by API routes AND the worker)
-├── worker/             # Long-running Node process: `tsx src/worker/index.ts`
-│   ├── sites/types.ts  # SiteAdapter interface
-│   ├── sites/indeed/   # Indeed adapter: search, parse, apply steps, selectors.ts
-│   └── browser.ts      # Playwright persistent context
-├── lib/                # Integrations: prisma.ts, config.ts, queryClient.ts, anthropic.ts, sheets.ts
+├── services/           # Business logic + all Prisma access (used by API routes, cron, and the extension API)
+├── lib/                # Integrations: prisma.ts, config.ts, queryClient.ts, anthropic.ts, storage/
 ├── hooks/              # TanStack Query hooks (one per resource) + other hooks
-├── constants/          # Values shared by client components AND server/worker code
+├── constants/          # Values shared by client components AND server code
 ├── utils/              # Pure helpers
 ├── types/              # Shared interfaces/types
 ├── styles/             # theme.ts + global styles
 └── generated/          # Generated Prisma client — never edit by hand
+extension/              # Chrome MV3 extension (Phase 4)
 prisma/schema.prisma
 prisma.config.ts        # Prisma 7 config (repo root) — do not delete
-data/                   # Local-only (gitignored): app.db, browser-profile/, resumes/, errors/
+vercel.json             # Region + crons for the future deploy
+docs/                   # Local-only planning docs (gitignored)
+data/                   # Local-only (gitignored): uploads/ (local storage driver), errors/
 ```
 
 ---
 
 ## Commands
-- `npm run dev` — dashboard
-- `npm run worker` — `tsx watch --env-file=.env --env-file-if-exists=.env.local src/worker/index.ts`
+- `npm run dev`: the app on http://localhost:3000
 - `npm run build` / `npm start`
 - `npm run lint`
-- `npm run test` — Vitest (`src/**/*.test.ts`)
+- `npm run test`: Vitest (`src/**/*.test.ts`)
 - `npx prisma migrate dev` / `npx prisma generate` / `npx prisma studio`
+- `npx prisma migrate deploy`: apply migrations at deploy time
 
 ---
 
@@ -78,33 +94,33 @@ data/                   # Local-only (gitignored): app.db, browser-profile/, res
 ---
 
 ## Core Flow
-1. **Login (no stored passwords).** The worker opens headed Chromium via `chromium.launchPersistentContext('data/browser-profile')`. The user logs in to Indeed by hand once; the session is reused afterwards. **Never ask for, store, or type the user's password.**
-2. **Filters.** Role keywords, tech stack, work setup (remote/hybrid/onsite), location, expected salary, job type, date posted, minimum match score (default 70).
-3. **Resume.** Upload (PDF/DOCX → parsed) or build in a form. Stored as a **master resume JSON** (zod-validated).
-4. **Score.** The LLM returns zod-validated JSON `{ score, matchedSkills, missingSkills, reasoning }`. Skip jobs below the threshold.
-5. **Tailor.** Per-job resume (reordered and re-emphasized) + a cover letter when the form asks for one.
-6. **Answer bank.** Stored answers to screening questions (years per skill, salary, notice period, work authorization, relocation). The LLM maps new question wording to stored answers. **If there's no confident match, set status `needs_user`. Never guess.**
-7. **Review queue (default mode).** The user approves or edits each tailored application; only approved items are submitted. Auto mode is opt-in, enabled through a `ConfirmModal` warning.
-8. **Daily cap + pacing.** A user-set daily max, with randomized delays between actions and applications.
-9. **Track + dedupe.** Record every application before and after submission; sync to Google Sheets.
+1. **Account.** The user signs up and logs in through Better Auth. Locally, auth emails are printed to the terminal (`EMAIL_DRIVER=console`). **Never ask for, store, or type passwords for job sites.**
+2. **Filters.** Role keywords, skills & tools, work setup (remote/hybrid/onsite), location, expected salary, job type, date posted, minimum match score (default 70).
+3. **Resume.** Upload (PDF/DOCX → parsed) or build in a form. Stored as a **master resume JSON** (zod-validated). The original file goes through the storage driver.
+4. **Find jobs.** `JobSource` adapters for official/public job APIs. Searches run manually ("Search now") or on a daily schedule (a cron route: Vercel Cron in the cloud, `npm run cron` locally). Users can also save the job they're viewing through the extension.
+5. **Score.** The LLM returns zod-validated JSON `{ score, matchedSkills, missingSkills, reasoning }`. Jobs below the threshold are skipped.
+6. **Tailor.** A per-job resume (reordered and re-emphasized) + a cover letter when the form asks for one.
+7. **Answer bank.** Stored answers to screening questions (years per skill, salary, notice period, work authorization, relocation). The LLM maps new question wording to stored answers. **If there's no confident match, set status `NEEDS_USER`. Never guess.**
+8. **Review queue.** The user approves or edits each tailored application.
+9. **Apply (extension).** On the job's page, the extension autofills the form from the approved application. **The user reviews and clicks Submit.** The extension never submits on its own.
+10. **Track + dedupe.** Record every application before and after submission; export to `.xlsx` (Google Sheets optional).
 
-Dashboard ↔ worker communication goes **through the DB** (a `Task` table the worker polls). No Redis.
+Long AI work runs as queued tasks (the `Task` table, polled by the UI). No Redis.
 
-### Indeed specifics (v1 site)
-- Dedupe key: Indeed job key (`jk` param). Secondary key: hash of normalized `company + title + location`.
-- v1 only handles **"Easily apply" / Indeed Apply**. External-redirect jobs are logged as `EXTERNAL_MANUAL` with the link.
-- The apply flow is multi-step. Detect the current step from the page, not by fixed order, with one handler per step.
-- Prefer `getByRole` / `getByLabel` locators. Keep all selectors in `sites/indeed/selectors.ts`.
-- **CAPTCHA, verification, or an unknown form state → pause, set `NEEDS_USER`, and save a screenshot to `data/errors/`.** Never try to solve or bypass CAPTCHAs.
-- Indeed's terms restrict automated use. Keep volume low, keep human pacing, and keep review mode the default.
+### Job sites (extension)
+- Dedupe key: the site's job id (Indeed: `jk` param). Secondary key: hash of normalized `company + title + location` (`src/utils/jobHash.ts`).
+- Keep each site's selectors in one file (`extension/sites/<site>/selectors.ts`). Prefer role- and label-based lookups.
+- CAPTCHA, verification, or an unknown form state → stop and tell the user. Never try to solve or bypass.
+- External-redirect jobs are logged as `EXTERNAL_MANUAL` with the link.
 
 ### Data Model (minimum)
-- `Settings` (filters, dailyCap, mode, threshold)
-- `MasterResume` (JSON)
-- `AnswerBankEntry` (question, answer, tags)
+- `User`, `Session`, `Account` (Better Auth), `Device` (hashed extension tokens), `Subscription`, `UsageEvent`
+- `Settings` (filters, dailyCap, mode, threshold, schedule), one per user
+- `MasterResume` (JSON), `AnswerBankEntry` (question, answer, tags)
 - `Job` (site, externalId, url, title, company, location, salary, description, score, scoreJson, firstSeenAt), with `@@unique([site, externalId])`
 - `Application` (jobId, status enum `QUEUED | APPROVED | SUBMITTED | FAILED | SKIPPED | NEEDS_USER | EXTERNAL_MANUAL`, resumePath, coverLetter, submittedAt, error)
-- `Task` (type, payload JSON, status)
+- `Task` (type, payload JSON, status, progress)
+- Every user-owned model has `userId`. Services always filter by it.
 
 ### Spreadsheet Columns
 Date | Company | Title | Location | Salary | Score | Status | Job URL | Resume version | Cover letter (Y/N) | Notes
@@ -112,10 +128,10 @@ Date | Company | Title | Location | Salary | Score | Status | Job URL | Resume v
 ### Hard Rules (Product)
 - **Never fabricate** skills, employers, dates, titles, or credentials. Only rephrase, reorder, and emphasize what's in the master resume and answer bank.
 - Never store or type passwords, card numbers, or government IDs.
-- Never submit without approval unless auto mode is on.
-- Check dedupe before tailoring (saves LLM cost) **and** right before submitting.
+- Never submit an application. The user clicks Submit.
+- Check dedupe before tailoring (saves LLM cost) **and** before autofilling.
 - Validate all LLM output with zod and retry once on failure.
-- `data/`, `.env*`, and the Google service-account JSON are gitignored.
+- `data/`, `docs/`, `.env*`, and any service-account JSON are gitignored.
 
 ---
 
@@ -153,8 +169,8 @@ export const ActionsStack = styled(Stack)(({ theme }) => ({
 }));
 ```
 
-### Client/Server/Worker-Shared Config (`src/constants/`)
-A value needed by both a `'use client'` component and server or worker code (filter options, status labels, default settings) must live in `src/constants/<domain>.ts`, never inside a client component's folder. Next.js turns every export of a `'use client'` module into an opaque reference on the server.
+### Client/Server-Shared Config (`src/constants/`)
+A value needed by both a `'use client'` component and server code (filter options, status labels, default settings) must live in `src/constants/<domain>.ts`, never inside a client component's folder. Next.js turns every export of a `'use client'` module into an opaque reference on the server.
 
 ### API Routes (`src/app/api/`)
 - Routes never import `prisma`. They validate input (zod), call a `src/services/` function, and shape the response.
@@ -165,50 +181,57 @@ A value needed by both a `'use client'` component and server or worker code (fil
   throw err;
   ```
 - Use Prisma transactions for multi-model writes.
-- Single-user local app, so no auth layer. Don't add NextAuth.
+- From Phase 1, every route gets the current user (`requireUser()`) and passes `userId` to services. Extension routes authenticate with a device token. Cron routes check `CRON_SECRET`.
 
 ### Services
-- All business logic and DB access live in `src/services/`. Both API routes and the worker call the same services; never duplicate logic in the worker.
+- All business logic and DB access live in `src/services/`. Routes, cron and extension endpoints call the same services; never duplicate logic.
+
+### Drivers (local ↔ cloud)
+- Files: always go through `storage` from `@/lib/storage` (`put`, `get`, `delete`, `getUrl`). Never call `fs` or the R2/S3 SDK directly from services or routes.
+- Email (Phase 1): an email driver (`console` locally, a provider when deployed).
+- Billing (Phase 5): limits are checked in services. With `BILLING_ENABLED=false` every user is unlimited.
+- A new external service gets a driver too, with a local default that costs nothing.
 
 ### Prisma 7
-- Config in repo-root `prisma.config.ts`. Client generated to `src/generated/prisma`; always import from `@/generated/prisma/client`, never `@prisma/client`.
+- Config lives in repo-root `prisma.config.ts`. Migrations use `DIRECT_URL` when set (Neon's direct connection), otherwise `DATABASE_URL`.
+- The client is generated to `src/generated/prisma`; always import from `@/generated/prisma/client`, never `@prisma/client`.
 - Single client in `src/lib/prisma.ts`; never instantiate elsewhere:
   ```ts
-  import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
+  import { PrismaPg } from '@prisma/adapter-pg';
   import { PrismaClient } from '@/generated/prisma/client';
   import { config } from '@/lib/config';
 
-  const adapter = new PrismaBetterSqlite3({ url: config.databaseUrl });
+  const adapter = new PrismaPg({ connectionString: config.databaseUrl });
   export const prisma = new PrismaClient({ adapter });
   ```
+- Postgres text matching is case-sensitive. Use `mode: 'insensitive'` for user-facing search.
 
 ### Environment Variables
-- Access env only through `src/lib/config.ts`. Never use `process.env` elsewhere.
-  ```ts
-  // Client-safe
-  export const publicConfig = {};
-
-  // Server/worker-only
-  export const config = {
-    databaseUrl: process.env.DATABASE_URL!,
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY!,
-    llmModel: process.env.LLM_MODEL!,
-    googleSheetsId: process.env.GOOGLE_SHEETS_ID!,
-    googleServiceAccountJsonPath: process.env.GOOGLE_SERVICE_ACCOUNT_JSON_PATH!,
-  };
-  ```
+- Access env only through `src/lib/config.ts` (zod-validated at startup). Never use `process.env` elsewhere.
 - Only exception: the `NODE_ENV === 'development'` check gating `ReactQueryDevtools` in `providers.tsx`.
 - `.env` (gitignored) holds only the database URL:
   ```
-  DATABASE_URL=file:./data/app.db
+  DATABASE_URL=postgresql://postgres:<password>@localhost:5432/applypilot
   ```
-- `.env.local` (gitignored) holds everything else and overrides `.env`:
+- `.env.local` (gitignored) holds everything else and overrides `.env`. Driver settings default to local values, so locally only the AI keys are required:
   ```
   ANTHROPIC_API_KEY=
   LLM_MODEL=
-  GOOGLE_SHEETS_ID=
-  GOOGLE_SERVICE_ACCOUNT_JSON_PATH=
+  # Optional; local defaults shown
+  APP_URL=http://localhost:3000
+  STORAGE_DRIVER=local          # local | r2
+  EMAIL_DRIVER=console
+  BILLING_ENABLED=false
+  CRON_SECRET=
+  # Only when STORAGE_DRIVER=r2
+  R2_ACCOUNT_ID=
+  R2_ACCESS_KEY_ID=
+  R2_SECRET_ACCESS_KEY=
+  R2_BUCKET=
+  # Only when deployed on Neon
+  DIRECT_URL=
   ```
+- When deployed, these values go in Vercel's Environment Variables settings.
 
 ### Data Fetching (TanStack Query)
 - All fetching goes through `useQuery`/`useMutation` hooks in `src/hooks/`. Never raw `fetch` + `useState`/`useEffect` in a component.
@@ -223,7 +246,7 @@ A value needed by both a `'use client'` component and server or worker code (fil
   ```
 - On success, mutations call `invalidateQueries({ queryKey: xKeys.all })` and report errors via `useToastQueue().showToast`, never local error state.
 - Optimistic updates (e.g. approving or skipping in the review queue): `onMutate` snapshot + `setQueryData`, restore in `onError`, invalidate in `onSettled`.
-- Use `refetchInterval` for live worker status (queue, run progress).
+- Use `refetchInterval` for live task progress (searches, tailoring queue).
 - `ReactQueryDevtools` only in development.
 
 ### Global Route Files
@@ -242,7 +265,7 @@ Check this before building any UI. If a shared component covers 80% of the need,
 | `Textarea` | `shared/Textarea/` | Multi-line fields (cover letter edit, answer bank) |
 | `Dropdown` | `shared/Dropdown/` | Selects (work setup, job type, date posted), with a `searchable` option |
 | `Modal` | `shared/Modal/` | General dialogs (application preview/edit) |
-| `ConfirmModal` | `shared/ConfirmModal/` | Destructive or risky actions (enable auto mode, skip, delete). Props: `title`, `description`, `icon`, `severity: 'error' \| 'warning' \| 'primary'`, `confirmButtonType`, `confirmLabel`, `cancelLabel`, `children?` |
+| `ConfirmModal` | `shared/ConfirmModal/` | Destructive or risky actions (skip, delete, cancel a subscription). Props: `title`, `description`, `icon`, `severity: 'error' \| 'warning' \| 'primary'`, `confirmButtonType`, `confirmLabel`, `cancelLabel`, `children?` |
 | `PageTitle` | `shared/PageTitle/` | Every page heading. Props: `title`, `subtitle` (required on every page), `variant?`, `sx?`. The second word onward renders in `theme.palette.primary.main`. |
 | `ToastQueueProvider` | `shared/ToastQueueProvider/` | All toasts via `useToastQueue().showToast(message, severity?)` |
 | `LoadingState` | `shared/LoadingState/` | In-place loading (not route-level) |
@@ -255,13 +278,17 @@ Check this before building any UI. If a shared component covers 80% of the need,
 ## README
 - After adding, changing, or removing a feature, update `README.md`.
 - New env vars go in the Environment Variables section; new scripts go in the Scripts table.
+- Keep the "Deploy later" checklist current when a phase adds a cloud service.
 
 ---
 
 ## Build Phases
-1. Scaffold: Prisma 7 + SQLite, `config.ts`, theme + `providers.tsx` (ThemeRegistry, QueryClient, ToastQueue), app shell/nav, global route files, core shared components, settings/filters page, master resume (upload/parse + form), answer bank page
-2. Worker + persistent login + Indeed search & listing parse (read-only, no applying)
-3. Scoring + tailoring + cover letter + PDF; review queue (DataTable + Modal)
-4. Indeed apply flow (Easily apply only), daily cap, pacing, `NEEDS_USER` pauses
-5. Google Sheets sync + `.xlsx` export
-6. Hardening: retries, error screenshots, logs, Vitest tests for services and the LLM output parsers
+Everything runs locally until the owner decides to deploy.
+0. **Platform:** local Postgres, storage driver, `config.ts` validation, `vercel.json`, deploy-ready README (no deploy)
+1. **Multi-user foundation:** Better Auth, `userId` on all models, `requireUser()`, per-user pages, account delete/export
+2. **Job sources:** `JobSource` interface, first 1–2 official APIs, cron route + "Search now", Jobs page with dedupe
+3. **AI core:** score, tailor, cover letter, PDF, answer matching, review queue, queued long tasks, `UsageEvent` metering
+4. **Extension:** MV3, device-code login, side panel to save/score/tailor/autofill/mark applied; the user submits
+5. **Billing:** plans, webhooks, limits enforced (off locally), pricing/terms pages
+6. **Tracking + export:** History page, `.xlsx` export, optional Google Sheets
+7. **Hardening:** Vitest for services/parsers/scoping, rate limits, monitoring, spend limits

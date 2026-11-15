@@ -1,6 +1,6 @@
 // src\types\task.ts
 import { z } from 'zod';
-import { TASK_SOURCES } from '@/constants/worker';
+import { TASK_SOURCES } from '@/constants/taskStatus';
 import type { TaskStatus } from '@/generated/prisma/enums';
 
 export const searchTaskPayloadSchema = z.object({

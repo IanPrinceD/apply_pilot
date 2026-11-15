@@ -1,5 +1,5 @@
 // src\services\settingsService.ts
-import { INDEED_SITE_VALUES, type IndeedSite } from '@/constants/indeed';
+import { DEFAULT_CURRENCY, isCurrencyCode } from '@/constants/currencies';
 import type { Settings } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
 import { DEFAULT_SETTINGS, filtersSchema, type SettingsDto, type SettingsInput } from '@/types/settings';
@@ -7,19 +7,22 @@ import { isRunDue } from '@/utils/schedule';
 
 const SETTINGS_ID = 1;
 
-/** Narrows the stored site string to a known site, defaulting to "us". */
-const toIndeedSite = (value: string): IndeedSite =>
-  (INDEED_SITE_VALUES as readonly string[]).includes(value) ? (value as IndeedSite) : 'us';
+/** Replaces a stored currency that's no longer valid (e.g. an old free-text value) with the default. */
+const withValidCurrency = (raw: unknown): unknown => {
+  if (!raw || typeof raw !== 'object') return raw;
+  const { salaryCurrency } = raw as { salaryCurrency?: unknown };
+  const valid = typeof salaryCurrency === 'string' && isCurrencyCode(salaryCurrency.trim().toUpperCase());
+  return valid ? raw : { ...raw, salaryCurrency: DEFAULT_CURRENCY };
+};
 
 /** Maps a Settings row to the API shape, falling back to defaults for malformed filter JSON. */
 const toDto = (row: Settings): SettingsDto => {
-  const filters = filtersSchema.safeParse(row.filters);
+  const filters = filtersSchema.safeParse(withValidCurrency(row.filters));
   return {
     filters: filters.success ? filters.data : DEFAULT_SETTINGS.filters,
     dailyCap: row.dailyCap,
     mode: row.mode,
     threshold: row.threshold,
-    indeedSite: toIndeedSite(row.indeedSite),
     scheduleEnabled: row.scheduleEnabled,
     scheduleTime: row.scheduleTime,
     lastScheduledRunAt: row.lastScheduledRunAt?.toISOString() ?? null,

@@ -1,4 +1,4 @@
-// ApplyPilot schema — SQLite via @prisma/adapter-better-sqlite3.
+// ApplyPilot schema — PostgreSQL via @prisma/adapter-pg (local Postgres now, Neon when deployed).
 // Client is generated to src/generated/prisma; import from '@/generated/prisma/client'.
 
 generator client {
@@ -7,7 +7,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 enum RunMode {
@@ -34,13 +34,6 @@ enum TaskStatus {
   CANCELLED
 }
 
-enum WorkerStateValue {
-  IDLE
-  SEARCHING
-  NEEDS_LOGIN
-  NEEDS_USER
-}
-
 /// Singleton row (id = 1): search filters + run behaviour.
 model Settings {
   id                 Int       @id @default(1)
@@ -49,10 +42,8 @@ model Settings {
   dailyCap           Int       @default(10)
   mode               RunMode   @default(REVIEW)
   threshold          Int       @default(70)
-  /// Key into INDEED_SITES in src/constants/indeed.ts (e.g. "us", "ph")
-  indeedSite         String    @default("us")
   scheduleEnabled    Boolean   @default(false)
-  /// "HH:mm", local time of the machine running the worker
+  /// "HH:mm", local time of the machine running the app
   scheduleTime       String    @default("09:00")
   lastScheduledRunAt DateTime?
   updatedAt          DateTime  @updatedAt
@@ -121,7 +112,7 @@ model Application {
   @@index([status])
 }
 
-/// Dashboard → worker queue. The worker polls PENDING tasks.
+/// Queue for long-running work (searches, tailoring). The UI polls progress.
 model Task {
   id             String     @id @default(cuid())
   type           String
@@ -132,21 +123,11 @@ model Task {
   /// Human-readable status line shown on the Jobs page
   message        String?
   error          String?
-  /// Saved when the worker pauses (CAPTCHA / unknown page), under data/errors/
+  /// Optional screenshot/evidence path saved when a task pauses or fails
   screenshotPath String?
   createdAt      DateTime   @default(now())
   startedAt      DateTime?
   finishedAt     DateTime?
 
   @@index([status, createdAt])
-}
-
-/// Singleton row (id = 1) the worker updates on every heartbeat.
-model WorkerState {
-  id            Int              @id @default(1)
-  state         WorkerStateValue @default(IDLE)
-  loggedIn      Boolean          @default(false)
-  currentTaskId String?
-  message       String?
-  heartbeatAt   DateTime         @default(now())
 }

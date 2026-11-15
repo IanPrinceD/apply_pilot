@@ -110,7 +110,13 @@ export const listJobs = async ({ easyApply, search, limit }: JobListQuery): Prom
   const where: Prisma.JobWhereInput = {
     ...(easyApply === undefined ? {} : { easyApply }),
     ...(search
-      ? { OR: [{ title: { contains: search } }, { company: { contains: search } }, { location: { contains: search } }] }
+      ? {
+          OR: [
+            { title: { contains: search, mode: 'insensitive' } },
+            { company: { contains: search, mode: 'insensitive' } },
+            { location: { contains: search, mode: 'insensitive' } },
+          ],
+        }
       : {}),
   };
   const rows = await prisma.job.findMany({ where, orderBy: { firstSeenAt: 'desc' }, take: limit });

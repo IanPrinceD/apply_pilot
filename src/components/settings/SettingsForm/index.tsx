@@ -24,6 +24,7 @@ import {
   WORK_SETUP_OPTIONS,
   type WorkSetup,
 } from '@/constants/settings';
+import { CURRENCY_OPTIONS, DEFAULT_CURRENCY } from '@/constants/currencies';
 import { buildRoleOptions, buildSkillOptions } from '@/constants/suggestions';
 import { useMasterResume } from '@/hooks/useResume';
 import { useSettings, useUpdateSettings } from '@/hooks/useSettings';
@@ -52,7 +53,6 @@ const toInput = ({
   dailyCap,
   mode,
   threshold,
-  indeedSite,
   scheduleEnabled,
   scheduleTime,
 }: SettingsDto): SettingsInput => ({
@@ -60,7 +60,6 @@ const toInput = ({
   dailyCap,
   mode,
   threshold,
-  indeedSite,
   scheduleEnabled,
   scheduleTime,
 });
@@ -235,11 +234,12 @@ const SettingsFormInner = ({ initial, resume }: SettingsFormInnerProps) => {
               onChange={(e) => setFilter('salaryMin', e.target.value === '' ? null : Number(e.target.value))}
               slotProps={{ htmlInput: { min: 0 } }}
             />
-            <Input
+            <Dropdown
               label="Currency"
+              searchable
+              options={CURRENCY_OPTIONS}
               value={filters.salaryCurrency}
-              onChange={(e) => setFilter('salaryCurrency', e.target.value.toUpperCase())}
-              slotProps={{ htmlInput: { maxLength: 5 } }}
+              onChange={(v) => setFilter('salaryCurrency', v || DEFAULT_CURRENCY)}
             />
             <Dropdown
               label="Period"

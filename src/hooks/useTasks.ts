@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToastQueue } from '@/components/shared/ToastQueueProvider';
 import { ACTIVE_TASK_STATUSES } from '@/constants/taskStatus';
 import { jobsKeys } from '@/hooks/useJobs';
-import { workerKeys } from '@/hooks/useWorkerStatus';
 import type { TaskDto } from '@/types/task';
 import { apiFetch } from '@/utils/apiFetch';
 
@@ -33,7 +32,7 @@ export const useStartSearch = () => {
   return useMutation({
     mutationFn: () => apiFetch<TaskDto>('/api/tasks/search', { method: 'POST' }),
     onSuccess: () => {
-      showToast('Search queued — the worker will pick it up', 'success');
+      showToast('Search queued', 'success');
       return queryClient.invalidateQueries({ queryKey: tasksKeys.all });
     },
     onError: (err) => showToast(err.message, 'error'),
@@ -50,7 +49,6 @@ export const useCancelTask = () => {
       showToast('Search cancelled', 'info');
       return Promise.all([
         queryClient.invalidateQueries({ queryKey: tasksKeys.all }),
-        queryClient.invalidateQueries({ queryKey: workerKeys.all }),
         queryClient.invalidateQueries({ queryKey: jobsKeys.all }),
       ]);
     },

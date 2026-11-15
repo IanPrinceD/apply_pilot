@@ -6,7 +6,7 @@ import { handleRouteError } from '@/utils/routeError';
 
 const querySchema = z.object({ limit: z.coerce.number().int().min(1).max(50).default(10) });
 
-/** Lists recent worker tasks, newest first. */
+/** Lists recent tasks, newest first. */
 export const GET = async (req: Request) => {
   await connection();
   try {

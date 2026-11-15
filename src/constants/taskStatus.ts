@@ -1,6 +1,16 @@
 // src\constants\taskStatus.ts
 import type { StatusColor } from '@/constants/applicationStatus';
-import type { TaskStatus, WorkerStateValue } from '@/generated/prisma/enums';
+import type { TaskStatus } from '@/generated/prisma/enums';
+
+export const TASK_TYPES = {
+  SEARCH_JOBS: 'SEARCH_JOBS',
+} as const;
+
+export type TaskType = (typeof TASK_TYPES)[keyof typeof TASK_TYPES];
+
+/** What queued a task: the user ("Search now") or the daily schedule. */
+export const TASK_SOURCES = ['manual', 'schedule'] as const;
+export type TaskSource = (typeof TASK_SOURCES)[number];
 
 export interface StatusLabel {
   label: string;
@@ -14,17 +24,6 @@ export const TASK_STATUS_META: Record<TaskStatus, StatusLabel> = {
   DONE: { label: 'Done', color: 'success' },
   FAILED: { label: 'Failed', color: 'error' },
   CANCELLED: { label: 'Cancelled', color: 'secondary' },
-};
-
-/** Worker state as shown on the dashboard; OFFLINE is derived from a stale heartbeat. */
-export type WorkerDisplayState = WorkerStateValue | 'OFFLINE';
-
-export const WORKER_STATE_META: Record<WorkerDisplayState, StatusLabel> = {
-  OFFLINE: { label: 'Offline', color: 'default' },
-  IDLE: { label: 'Idle', color: 'success' },
-  SEARCHING: { label: 'Searching', color: 'info' },
-  NEEDS_LOGIN: { label: 'Needs login', color: 'warning' },
-  NEEDS_USER: { label: 'Needs you', color: 'warning' },
 };
 
 /** Statuses where a task is still in progress. */
